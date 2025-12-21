@@ -49,6 +49,13 @@ runs:
               const list = await github.rest.repos.listCommits({ owner, repo, per_page: 250, sha: currentTag });
               commits = list.data || [];
             }
+            commits.sort((a, b) => {
+              const getTime = c => {
+                const d = (c.commit && c.commit.author && c.commit.author.date) || (c.commit && c.commit.committer && c.commit.committer.date) || null;
+                return d ? new Date(d).getTime() : 0;
+              };
+              return getTime(b) - getTime(a);
+            });
             let commitsText;
             if (!commits || commits.length === 0) {
               commitsText = '- (no commits found)';
