@@ -1,0 +1,58 @@
+name: CMake build with ARM toolchain
+description: Configure, build and package MCU binaries
+inputs:
+  flags_file_path:
+    description: "Flags file path"
+    required: true
+  project_name:
+    description: "Project name used for artifact prefix"
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: Install ARM toolchain
+      uses: carlosperate/arm-none-eabi-gcc-action@v1
+      with:
+        release: 'latest'
+        path-env-var: ARM_NONE_EABI_GCC_PATH
+
+    - name: Create configuration
+      shell: bash
+      run: |
+        file_path=${{ inputs.flags_file_path }}
+        file_name=$(basename $file_path)
+        configuration_name="${file_name%.*}"
+        echo "CONFIGURATION_NAME=${configuration_name}" >> "$GITHUB_ENV"
+        echo "BUILD_FOLDER_NAME=build_${configuration_name}" >> "$GITHUB_ENV"
+        echo "ARTIFACT_NAME=${{ inputs.project_name }}_${configuration_name}_${{ github.ref_name }}" >> "$GITHUB_ENV"
+
+    - name: Configure CMake
+      shell: bash
+      run: |
+        mapfile -t cmake_flags < ${{ inputs.flags_file_path }}
+        echo "cmake_flags=${cmake_flags[@]}"
+        cmake -B ${{github.workspace}}/${{ env.BUILD_FOLDER_NAME }} \
+          -DCMAKE_TOOLCHAIN_FILE="script/cmake-arm-none-eabi/toolchain.cmake" \
+          -DTOOLCHAIN_PATH="$ARM_NONE_EABI_GCC_PATH" \
+          "${cmake_flags[@]}" \
+          -G "Unix Makefiles"
+
+    - name: Build
+      shell: bash
+      run: cmake --build ${{github.workspace}}/${{ env.BUILD_FOLDER_NAME }}
+
+    - name: Rename binaries and create artifact
+      shell: bash
+      run: |
+        cd ${{github.workspace}}/${{ env.BUILD_FOLDER_NAME }}
+        mv *.elf ${{ env.ARTIFACT_NAME }}.elf
+        mv *.hex ${{ env.ARTIFACT_NAME }}.hex
+        mv *.bin ${{ env.ARTIFACT_NAME }}.bin
+        zip ${{ env.ARTIFACT_NAME }}.zip *.elf *.hex *.bin
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v6
+      with:
+        name: ${{ env.ARTIFACT_NAME }}
+        path: ${{github.workspace}}/${{ env.BUILD_FOLDER_NAME }}/*.zip
+        retention-days: 1

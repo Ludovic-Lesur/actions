@@ -1,0 +1,31 @@
+name: Generate CMake matrix compilation flags files
+description: "Generate CMake matrix compilation flags files"
+inputs:
+  json_file_path:
+    description: "Input JSON file"
+    required: true
+  output_folder_path:
+    description: "Folder where the flags files will be created."
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: Create flags files.
+      shell: bash
+      env:
+        JSON_FILE_PATH: ${{ inputs.json_file_path }}
+        OUTPUT_FOLDER_PATH: ${{ inputs.output_folder_path }}
+      run: |
+        set -euo pipefail
+
+        if [ -z "${JSON_FILE_PATH}" ]; then
+          echo "file_path input is empty" >&2
+          exit 1
+        fi
+        
+        if [ ! -f "${JSON_FILE_PATH}" ]; then
+          echo "File ${JSON_FILE_PATH} not found in workspace. Ensure the caller did actions/checkout before calling this action." >&2
+          exit 1
+        fi
+        
+        python3 "$GITHUB_ACTION_PATH/generate_cmake_flags_files.py" -i $JSON_FILE_PATH -o $OUTPUT_FOLDER_PATH

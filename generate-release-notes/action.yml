@@ -1,0 +1,77 @@
+name: Generate release notes
+description: 'Generate release notes containing the list of commits since last release'
+inputs:
+  github_token:
+    description: "GitHub token"
+    required: true
+outputs:
+  release_body:
+    description: "Output text for release body"
+    value: ${{ steps.generate.outputs.release_body }}
+runs:
+  using: "composite"
+  steps:
+    - name: Generate release notes
+      id: generate
+      uses: actions/github-script@v6
+      with:
+        github-token: ${{ inputs.github_token }}
+        script: |
+          const owner = context.repo.owner;
+          const repo = context.repo.repo;
+          const currentTag = process.env.GITHUB_REF?.replace('refs/tags/','');
+          if(!currentTag) core.setFailed('No tag found in GITHUB_REF');
+            const tagsResp = await github.paginate(github.rest.repos.listTags, { owner, repo, per_page: 100 });
+            const tags = tagsResp.map(t => t.name);
+            const tagInfos = [];
+            for (const t of tags) {
+              try {
+                const commitResp = await github.rest.repos.getCommit({ owner, repo, ref: t });
+                const date = commitResp.data.commit.author?.date || commitResp.data.commit.committer?.date || null;
+                tagInfos.push({ name: t, date });
+              }
+              catch(e) {}
+            }
+            // sort by date descending (newest first)
+            tagInfos.sort((a, b) => {
+              const da = a.date ? new Date(a.date).getTime() : 0;
+              const db = b.date ? new Date(b.date).getTime() : 0;
+              return db - da;
+            });
+            const idx = tagInfos.findIndex(t => t.name === currentTag);
+            const previousTag = (idx >= 0 && idx < tagInfos.length - 1) ? tagInfos[idx + 1].name : null;
+            let commits = [];
+            if (previousTag) {
+              const comp = await github.rest.repos.compareCommits({ owner, repo, base: previousTag, head: currentTag });
+              commits = comp.data.commits || [];
+            }
+            else {
+              const list = await github.rest.repos.listCommits({ owner, repo, per_page: 250, sha: currentTag });
+              commits = list.data || [];
+            }
+            let commitsText;
+            if (!commits || commits.length === 0) {
+              commitsText = '- (no commits found)';
+            }
+            else {
+              commitsText = commits.map(c => {
+                const subj = (c.commit && c.commit.message) ? c.commit.message.split('\\n')[0] : '(no message)';
+                const short = (c.sha || '').slice(0,7);
+                const author = (c.commit && c.commit.author && c.commit.author.name) || (c.author && c.author.login) || 'unknown';
+                const dateRaw = (c.commit && c.commit.author && c.commit.author.date) || (c.commit && c.commit.committer && c.commit.committer.date) || null;
+                let dateTime = 'unknown date';
+                if (dateRaw) {
+                  const iso = new Date(dateRaw).toISOString();
+                  const d = iso.split('T')[0];
+                  const t = iso.split('T')[1].slice(0,5);
+                  dateTime = `${d} ${t} UTC`;
+                }
+                return `- ${dateTime} - **${subj}** (${short}) by ${author}`;
+              }).join('\n');
+            }
+            const header = previousTag ? `Changes since previous release (${previousTag}):` : `Changes from project creation:`;
+            const body = `${header}
+
+            ${commitsText}`;
+
+            core.setOutput('release_body', body);
