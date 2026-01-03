@@ -26,7 +26,8 @@ runs:
         configuration_name="${file_name%.*}"
         echo "CONFIGURATION_NAME=${configuration_name}" >> "$GITHUB_ENV"
         echo "BUILD_FOLDER_NAME=build_${configuration_name}" >> "$GITHUB_ENV"
-        echo "ARTIFACT_NAME=${{ inputs.project_name }}_${configuration_name}_${tag_name}" >> "$GITHUB_ENV"
+        artifact_name=$(python3 "$GITHUB_ACTION_PATH/build_artifact_name.py" -p "${{ inputs.project_name }}" -c "$configuration_name" -t "$tag_name")
+        echo "ARTIFACT_NAME=${artifact_name}" >> "$GITHUB_ENV"
 
     - name: Configure CMake
       shell: bash
