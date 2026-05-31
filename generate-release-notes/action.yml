@@ -54,22 +54,24 @@ runs:
             }
             catch(e) {}
           }
-          // sort by date descending (newest first)
-          tagInfos.sort((a, b) => {
+          let previousTag = null;
+          const candidateTags = tagInfos.filter(t => t.name !== currentTag && t.sha !== currentCommitSha);
+          const previousCandidates = [];
+          for (const tag of candidateTags) {
+            try {
+              const comp = await github.rest.repos.compareCommits({ owner, repo, base: tag.name, head: currentTag });
+              if (comp.data.status === 'ahead') {
+                previousCandidates.push(tag);
+              }
+            }
+            catch(e) {}
+          }
+          previousCandidates.sort((a, b) => {
             const da = a.date ? new Date(a.date).getTime() : 0;
             const db = b.date ? new Date(b.date).getTime() : 0;
             return db - da;
           });
-          const idx = tagInfos.findIndex(t => t.name === currentTag);
-          let previousTag = null;
-          if (idx >= 0) {
-            for (let i = idx + 1; i < tagInfos.length; i++) {
-              if (tagInfos[i].sha !== currentCommitSha) {
-                previousTag = tagInfos[i].name;
-                break;
-              }
-            }
-          }
+          previousTag = previousCandidates.length > 0 ? previousCandidates[0].name : null;
           let commits = [];
           if (previousTag) {
             const comp = await github.rest.repos.compareCommits({ owner, repo, base: previousTag, head: currentTag });
@@ -108,5 +110,6 @@ runs:
           }
           const header = previousTag ? `Changes since previous release (${previousTag}):` : `Changes from project creation:`;
           const body = `${header}
+
           ${commitsText}`;
           core.setOutput('release_body', body);
