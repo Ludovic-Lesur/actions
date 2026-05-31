@@ -1,0 +1,67 @@
+name: Git describe from action
+description: 'Compute a git describe like version string from the nearest annotated tag in GitHub Actions'
+inputs:
+  tag_pattern:
+    description: Glob pattern passed to git describe --match
+    required: false
+    default: 'sw*'
+  tag_regex:
+    description: Regular expression used to validate the selected base tag
+    required: false
+    default: '^sw[0-9]+\.[0-9]+$'
+  sha_length:
+    description: Length of the short commit SHA
+    required: false
+    default: '7'
+outputs:
+  git_version:
+    description: Git describe like version string
+    value: ${{ steps.compute.outputs.git_version }}
+  base_tag:
+    description: Base annotated tag used to compute the version
+    value: ${{ steps.compute.outputs.base_tag }}
+  commit_count:
+    description: Number of commits since the base tag
+    value: ${{ steps.compute.outputs.commit_count }}
+  short_sha:
+    description: Abbreviated HEAD commit SHA
+    value: ${{ steps.compute.outputs.short_sha }}
+runs:
+  using: composite
+  steps:
+    - name: Compute git describe like version
+      id: compute
+      shell: bash
+      run: |
+        set -euo pipefail
+        git_describe_from_action() {
+          local tag_pattern="$1"
+          local tag_regex="$2"
+          local sha_length="$3"
+          local short_sha
+          local base_tag
+          local commit_count
+          local git_version
+          short_sha="$(git rev-parse --short="$sha_length" HEAD)"
+          base_tag="$(git describe --abbrev=0 --match "$tag_pattern")"
+          if [[ -z "$base_tag" ]]; then
+            echo "No annotated tag found matching pattern: $tag_pattern" >&2
+            return 1
+          fi
+          if [[ ! "$base_tag" =~ $tag_regex ]]; then
+            echo "Selected tag does not match expected regex: $base_tag" >&2
+            echo "Expected regex: $tag_regex" >&2
+            return 1
+          fi
+          commit_count="$(git rev-list --count "${base_tag}..HEAD")"
+          if [[ -z "$commit_count" ]]; then
+            echo "Unable to count commits since tag: $base_tag" >&2
+            return 1
+          fi
+          git_version="${base_tag}-${commit_count}-g${short_sha}"
+          echo "base_tag=$base_tag" >> "$GITHUB_OUTPUT"
+          echo "commit_count=$commit_count" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
+          echo "git_version=$git_version" >> "$GITHUB_OUTPUT"
+        }
+        git_describe_from_action "${{ inputs.tag_pattern }}" "${{ inputs.tag_regex }}" "${{ inputs.sha_length }}"
