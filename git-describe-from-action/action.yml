@@ -1,14 +1,10 @@
 name: Git describe from action
-description: 'Compute a git describe like version string from the nearest annotated tag in GitHub Actions'
+description: 'Compute a git-describe-like version string from the triggering tag or the nearest annotated release tag in GitHub Actions'
 inputs:
   tag_pattern:
-    description: Glob pattern passed to git describe --match
+    description: Glob pattern passed to git describe --match for fallback resolution
     required: false
     default: 'sw*'
-  tag_regex:
-    description: Regular expression used to validate the selected base tag
-    required: false
-    default: '^sw[0-9]+\.[0-9]+$'
   sha_length:
     description: Length of the short commit SHA
     required: false
@@ -36,27 +32,38 @@ runs:
         set -euo pipefail
         git_describe_from_action() {
           local tag_pattern="$1"
-          local tag_regex="$2"
-          local sha_length="$3"
+          local sha_length="$2"
+          local triggering_tag="${GITHUB_REF_NAME:-}"
           local short_sha
           local base_tag
           local commit_count
           local git_version
           short_sha="$(git rev-parse --short="$sha_length" HEAD)"
-          base_tag="$(git describe --abbrev=0 --match "$tag_pattern")"
-          if [[ -z "$base_tag" ]]; then
-            echo "No annotated tag found matching pattern: $tag_pattern" >&2
-            return 1
-          fi
-          if [[ ! "$base_tag" =~ $tag_regex ]]; then
-            echo "Selected tag does not match expected regex: $base_tag" >&2
-            echo "Expected regex: $tag_regex" >&2
-            return 1
-          fi
-          commit_count="$(git rev-list --count "${base_tag}..HEAD")"
-          if [[ -z "$commit_count" ]]; then
-            echo "Unable to count commits since tag: $base_tag" >&2
-            return 1
+          # Case 1: exact release tag swX.Y
+          if [[ -n "$triggering_tag" && "$triggering_tag" =~ ^sw([0-9]+)\.([0-9]+)$ ]]; then
+            base_tag="sw${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+            commit_count=0
+          # Case 2: derived/lightweight tag swX.Y.Z.<suffix>
+          elif [[ -n "$triggering_tag" && "$triggering_tag" =~ ^sw([0-9]+)\.([0-9]+)\.([0-9]+)\.(.+)$ ]]; then
+            base_tag="sw${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+            commit_count="${BASH_REMATCH[3]}"
+          # Fallback: derive from nearest annotated swX.Y tag
+          else
+            # Intentionally do not use --tags so that git describe keeps its default behavior and prefers annotated tags.
+            base_tag="$(git describe --abbrev=0 --match "$tag_pattern")"
+            if [[ -z "$base_tag" ]]; then
+              echo "No annotated tag found matching pattern: $tag_pattern" >&2
+              return 1
+            fi
+            if [[ ! "$base_tag" =~ ^sw([0-9]+)\.([0-9]+)$ ]]; then
+              echo "Selected tag is not a supported base release tag: $base_tag" >&2
+              return 1
+            fi
+            commit_count="$(git rev-list --count "${base_tag}..HEAD")"
+            if [[ -z "$commit_count" ]]; then
+              echo "Unable to count commits since tag: $base_tag" >&2
+              return 1
+            fi
           fi
           git_version="${base_tag}-${commit_count}-g${short_sha}"
           echo "base_tag=$base_tag" >> "$GITHUB_OUTPUT"
@@ -64,4 +71,4 @@ runs:
           echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
           echo "git_version=$git_version" >> "$GITHUB_OUTPUT"
         }
-        git_describe_from_action "${{ inputs.tag_pattern }}" "${{ inputs.tag_regex }}" "${{ inputs.sha_length }}"
+        git_describe_from_action "${{ inputs.tag_pattern }}" "${{ inputs.sha_length }}"
